@@ -23,17 +23,25 @@ function encode (obj, opt) {
   }
 
   var separator = opt.whitespace ? ' = ' : '='
-
+  var unescapedFields = opt.unescapedFields || [];
   Object.keys(obj).forEach(function (k, _, __) {
     var val = obj[k]
     if (val && Array.isArray(val)) {
       val.forEach(function (item) {
-        out += safe(k + '[]') + separator + safe(item) + '\n'
+        if(Array.isArray(unescapedFields) && unescapedFields.includes(k)){
+          out += unsafe(k + '[]') + separator + unsafe(item) + '\n'
+        } else {
+          out += safe(k + '[]') + separator + safe(item) + '\n'
+        }
       })
     } else if (val && typeof val === 'object') {
       children.push(k)
     } else {
-      out += safe(k) + separator + safe(val) + eol
+      if(Array.isArray(unescapedFields) && unescapedFields.includes(k)){
+        out += safe(k) + separator + safe(val).replace(/\\#/g, '#') + eol
+      } else {
+        out += safe(k) + separator + safe(val) + eol
+      }
     }
   })
 
@@ -45,8 +53,9 @@ function encode (obj, opt) {
     var nk = dotSplit(k).join('\\.')
     var section = (opt.section ? opt.section + '.' : '') + nk
     var child = encode(obj[k], {
+      unescapedFields: unescapedFields,
       section: section,
-      whitespace: opt.whitespace
+      whitespace: opt.whitespace,
     })
     if (out.length && child.length) {
       out += eol
@@ -62,14 +71,16 @@ function dotSplit (str) {
     .replace(/\\\./g, '\u0001')
     .split(/\./).map(function (part) {
       return part.replace(/\1/g, '\\.')
-      .replace(/\2LITERAL\\1LITERAL\2/g, '\u0001')
+        .replace(/\2LITERAL\\1LITERAL\2/g, '\u0001')
     })
 }
 
-function decode (str) {
+function decode (str, opt) {
   var out = {}
   var p = out
   var section = null
+  opt = opt || {}
+  opt.unescapedFields = opt.unescapedFields || []
   //          section     |key      = value
   var re = /^\[([^\]]*)\]$|^([^=]+)(=(.*))?$/i
   var lines = str.split(/[\r\n]+/g)
@@ -84,7 +95,12 @@ function decode (str) {
       return
     }
     var key = unsafe(match[2])
-    var value = match[3] ? unsafe(match[4]) : true
+    if(opt.unescapedFields.includes(key)){
+      var value = match[4];
+    } else {
+      var value = match[3] ? unsafe(match[4]) : true
+    }
+
     switch (value) {
       case 'true':
       case 'false':
@@ -150,10 +166,10 @@ function safe (val) {
     val.match(/[=\r\n]/) ||
     val.match(/^\[/) ||
     (val.length > 1 &&
-     isQuoted(val)) ||
+      isQuoted(val)) ||
     val !== val.trim())
-      ? JSON.stringify(val)
-      : val.replace(/;/g, '\\;').replace(/#/g, '\\#')
+    ? JSON.stringify(val)
+    : val.replace(/;/g, '\\;').replace(/#/g, '\\#');
 }
 
 function unsafe (val, doUnesc) {
